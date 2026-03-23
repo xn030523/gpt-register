@@ -215,6 +215,15 @@
             >
               上传 CPA
             </el-button>
+            <el-button
+              type="info"
+              plain
+              :loading="linkRegenerating"
+              :disabled="!selectedTokens.access_token"
+              @click="regenerateBindCardLinks"
+            >
+              重新生成链接
+            </el-button>
           </div>
 
           <div class="detail-grid">
@@ -298,17 +307,31 @@
             </div>
             <div class="token-card">
               <div class="token-card__header">
-                <span class="detail-item__label">绑卡链接</span>
+                <span class="detail-item__label">绑卡短链</span>
                 <el-button
                   link
                   type="primary"
                   :disabled="!selectedTokens.bind_card_url"
-                  @click="copyValue(selectedTokens.bind_card_url, '绑卡链接')"
+                  @click="copyValue(selectedTokens.bind_card_url, '绑卡短链')"
                 >
                   复制
                 </el-button>
               </div>
               <code>{{ selectedTokens.bind_card_url_summary || '-' }}</code>
+            </div>
+            <div class="token-card">
+              <div class="token-card__header">
+                <span class="detail-item__label">绑卡长链</span>
+                <el-button
+                  link
+                  type="primary"
+                  :disabled="!selectedTokens.bind_card_long_url"
+                  @click="copyValue(selectedTokens.bind_card_long_url, '绑卡长链')"
+                >
+                  复制
+                </el-button>
+              </div>
+              <code>{{ selectedTokens.bind_card_long_url_summary || '-' }}</code>
             </div>
           </div>
         </template>
@@ -355,6 +378,8 @@ type AccountTokens = {
   id_token_summary?: string | null
   bind_card_url?: string | null
   bind_card_url_summary?: string | null
+  bind_card_long_url?: string | null
+  bind_card_long_url_summary?: string | null
   has_tokens?: boolean
 }
 
@@ -365,6 +390,7 @@ const total = ref(0)
 const loading = ref(false)
 const detailLoading = ref(false)
 const detailVisible = ref(false)
+const linkRegenerating = ref(false)
 const selectedAccount = ref<Account | null>(null)
 const selectedTokens = ref<AccountTokens>({})
 const selectedIds = ref<number[]>([])
@@ -449,10 +475,7 @@ async function openDetail(id: number) {
   selectedTokens.value = {}
 
   try {
-    const [accountResponse, tokenResponse] = await Promise.all([
-      fetch(`/api/accounts/${id}`),
-      fetch(`/api/accounts/${id}/tokens`),
-    ])
+    const [accountResponse, tokenResponse] = await Promise.all([fetch(`/api/accounts/${id}`), fetchAccountTokens(id)])
     if (!accountResponse.ok || !tokenResponse.ok) {
       throw new Error('load account detail failed')
     }
@@ -465,6 +488,36 @@ async function openDetail(id: number) {
     ElMessage.error('加载账号详情失败')
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function fetchAccountTokens(id: number) {
+  return fetch(`/api/accounts/${id}/tokens`)
+}
+
+async function regenerateBindCardLinks() {
+  const accountID = selectedAccount.value?.id
+  if (!accountID) {
+    return
+  }
+
+  linkRegenerating.value = true
+  try {
+    const response = await fetch(`/api/accounts/${accountID}/tokens/regenerate-links`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      throw new Error(payload.error || 'regenerate bind card links failed')
+    }
+
+    selectedTokens.value = (await response.json()) as AccountTokens
+    ElMessage.success('绑卡链接已重新生成')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '重新生成绑卡链接失败'
+    ElMessage.error(message)
+  } finally {
+    linkRegenerating.value = false
   }
 }
 

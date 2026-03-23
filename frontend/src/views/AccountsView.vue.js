@@ -5,6 +5,7 @@ const total = ref(0);
 const loading = ref(false);
 const detailLoading = ref(false);
 const detailVisible = ref(false);
+const linkRegenerating = ref(false);
 const selectedAccount = ref(null);
 const selectedTokens = ref({});
 const selectedIds = ref([]);
@@ -79,10 +80,7 @@ async function openDetail(id) {
     selectedAccount.value = null;
     selectedTokens.value = {};
     try {
-        const [accountResponse, tokenResponse] = await Promise.all([
-            fetch(`/api/accounts/${id}`),
-            fetch(`/api/accounts/${id}/tokens`),
-        ]);
+        const [accountResponse, tokenResponse] = await Promise.all([fetch(`/api/accounts/${id}`), fetchAccountTokens(id)]);
         if (!accountResponse.ok || !tokenResponse.ok) {
             throw new Error('load account detail failed');
         }
@@ -96,6 +94,34 @@ async function openDetail(id) {
     }
     finally {
         detailLoading.value = false;
+    }
+}
+async function fetchAccountTokens(id) {
+    return fetch(`/api/accounts/${id}/tokens`);
+}
+async function regenerateBindCardLinks() {
+    const accountID = selectedAccount.value?.id;
+    if (!accountID) {
+        return;
+    }
+    linkRegenerating.value = true;
+    try {
+        const response = await fetch(`/api/accounts/${accountID}/tokens/regenerate-links`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            const payload = (await response.json().catch(() => ({})));
+            throw new Error(payload.error || 'regenerate bind card links failed');
+        }
+        selectedTokens.value = (await response.json());
+        ElMessage.success('绑卡链接已重新生成');
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : '重新生成绑卡链接失败';
+        ElMessage.error(message);
+    }
+    finally {
+        linkRegenerating.value = false;
     }
 }
 async function runRowAction(account, action, reloadDetail = false) {
@@ -1229,6 +1255,32 @@ if (__VLS_ctx.selectedAccount) {
     [];
     var __VLS_251;
     var __VLS_252;
+    let __VLS_256;
+    /** @ts-ignore @type {typeof __VLS_components.elButton | typeof __VLS_components.ElButton | typeof __VLS_components.elButton | typeof __VLS_components.ElButton} */
+    elButton;
+    // @ts-ignore
+    const __VLS_257 = __VLS_asFunctionalComponent1(__VLS_256, new __VLS_256({
+        ...{ 'onClick': {} },
+        type: "info",
+        plain: true,
+        loading: (__VLS_ctx.linkRegenerating),
+        disabled: (!__VLS_ctx.selectedTokens.access_token),
+    }));
+    const __VLS_258 = __VLS_257({
+        ...{ 'onClick': {} },
+        type: "info",
+        plain: true,
+        loading: (__VLS_ctx.linkRegenerating),
+        disabled: (!__VLS_ctx.selectedTokens.access_token),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_257));
+    let __VLS_261;
+    const __VLS_262 = ({ click: {} },
+        { onClick: (__VLS_ctx.regenerateBindCardLinks) });
+    const { default: __VLS_263 } = __VLS_259.slots;
+    // @ts-ignore
+    [linkRegenerating, selectedTokens, regenerateBindCardLinks,];
+    var __VLS_259;
+    var __VLS_260;
     __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
         ...{ class: "detail-grid" },
     });
@@ -1313,68 +1365,24 @@ if (__VLS_ctx.selectedAccount) {
     /** @type {__VLS_StyleScopedClasses['detail-item__label']} */ ;
     __VLS_asFunctionalElement1(__VLS_intrinsics.span, __VLS_intrinsics.span)({});
     (__VLS_ctx.formatDate(__VLS_ctx.selectedAccount.cpa_uploaded_at));
-    let __VLS_256;
+    let __VLS_264;
     /** @ts-ignore @type {typeof __VLS_components.elDivider | typeof __VLS_components.ElDivider | typeof __VLS_components.elDivider | typeof __VLS_components.ElDivider} */
     elDivider;
     // @ts-ignore
-    const __VLS_257 = __VLS_asFunctionalComponent1(__VLS_256, new __VLS_256({
+    const __VLS_265 = __VLS_asFunctionalComponent1(__VLS_264, new __VLS_264({
         contentPosition: "left",
     }));
-    const __VLS_258 = __VLS_257({
+    const __VLS_266 = __VLS_265({
         contentPosition: "left",
-    }, ...__VLS_functionalComponentArgsRest(__VLS_257));
-    const { default: __VLS_261 } = __VLS_259.slots;
+    }, ...__VLS_functionalComponentArgsRest(__VLS_265));
+    const { default: __VLS_269 } = __VLS_267.slots;
     // @ts-ignore
     [formatDate, formatDate, formatDate, formatDate, selectedAccount, selectedAccount, selectedAccount, selectedAccount, selectedAccount, selectedAccount, selectedAccount, selectedAccount,];
-    var __VLS_259;
+    var __VLS_267;
     __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
         ...{ class: "token-grid" },
     });
     /** @type {__VLS_StyleScopedClasses['token-grid']} */ ;
-    __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
-        ...{ class: "token-card" },
-    });
-    /** @type {__VLS_StyleScopedClasses['token-card']} */ ;
-    __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
-        ...{ class: "token-card__header" },
-    });
-    /** @type {__VLS_StyleScopedClasses['token-card__header']} */ ;
-    __VLS_asFunctionalElement1(__VLS_intrinsics.span, __VLS_intrinsics.span)({
-        ...{ class: "detail-item__label" },
-    });
-    /** @type {__VLS_StyleScopedClasses['detail-item__label']} */ ;
-    let __VLS_262;
-    /** @ts-ignore @type {typeof __VLS_components.elButton | typeof __VLS_components.ElButton | typeof __VLS_components.elButton | typeof __VLS_components.ElButton} */
-    elButton;
-    // @ts-ignore
-    const __VLS_263 = __VLS_asFunctionalComponent1(__VLS_262, new __VLS_262({
-        ...{ 'onClick': {} },
-        link: true,
-        type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.access_token),
-    }));
-    const __VLS_264 = __VLS_263({
-        ...{ 'onClick': {} },
-        link: true,
-        type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.access_token),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_263));
-    let __VLS_267;
-    const __VLS_268 = ({ click: {} },
-        { onClick: (...[$event]) => {
-                if (!(__VLS_ctx.selectedAccount))
-                    return;
-                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.access_token, 'Access Token');
-                // @ts-ignore
-                [selectedTokens, selectedTokens, copyValue,];
-            } });
-    const { default: __VLS_269 } = __VLS_265.slots;
-    // @ts-ignore
-    [];
-    var __VLS_265;
-    var __VLS_266;
-    __VLS_asFunctionalElement1(__VLS_intrinsics.code, __VLS_intrinsics.code)({});
-    (__VLS_ctx.selectedTokens.access_token_summary || '-');
     __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
         ...{ class: "token-card" },
     });
@@ -1395,22 +1403,22 @@ if (__VLS_ctx.selectedAccount) {
         ...{ 'onClick': {} },
         link: true,
         type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.refresh_token),
+        disabled: (!__VLS_ctx.selectedTokens.access_token),
     }));
     const __VLS_272 = __VLS_271({
         ...{ 'onClick': {} },
         link: true,
         type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.refresh_token),
+        disabled: (!__VLS_ctx.selectedTokens.access_token),
     }, ...__VLS_functionalComponentArgsRest(__VLS_271));
     let __VLS_275;
     const __VLS_276 = ({ click: {} },
         { onClick: (...[$event]) => {
                 if (!(__VLS_ctx.selectedAccount))
                     return;
-                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.refresh_token, 'Refresh Token');
+                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.access_token, 'Access Token');
                 // @ts-ignore
-                [selectedTokens, selectedTokens, selectedTokens, copyValue,];
+                [selectedTokens, selectedTokens, copyValue,];
             } });
     const { default: __VLS_277 } = __VLS_273.slots;
     // @ts-ignore
@@ -1418,7 +1426,7 @@ if (__VLS_ctx.selectedAccount) {
     var __VLS_273;
     var __VLS_274;
     __VLS_asFunctionalElement1(__VLS_intrinsics.code, __VLS_intrinsics.code)({});
-    (__VLS_ctx.selectedTokens.refresh_token_summary || '-');
+    (__VLS_ctx.selectedTokens.access_token_summary || '-');
     __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
         ...{ class: "token-card" },
     });
@@ -1439,20 +1447,20 @@ if (__VLS_ctx.selectedAccount) {
         ...{ 'onClick': {} },
         link: true,
         type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.id_token),
+        disabled: (!__VLS_ctx.selectedTokens.refresh_token),
     }));
     const __VLS_280 = __VLS_279({
         ...{ 'onClick': {} },
         link: true,
         type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.id_token),
+        disabled: (!__VLS_ctx.selectedTokens.refresh_token),
     }, ...__VLS_functionalComponentArgsRest(__VLS_279));
     let __VLS_283;
     const __VLS_284 = ({ click: {} },
         { onClick: (...[$event]) => {
                 if (!(__VLS_ctx.selectedAccount))
                     return;
-                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.id_token, 'ID Token');
+                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.refresh_token, 'Refresh Token');
                 // @ts-ignore
                 [selectedTokens, selectedTokens, selectedTokens, copyValue,];
             } });
@@ -1462,7 +1470,7 @@ if (__VLS_ctx.selectedAccount) {
     var __VLS_281;
     var __VLS_282;
     __VLS_asFunctionalElement1(__VLS_intrinsics.code, __VLS_intrinsics.code)({});
-    (__VLS_ctx.selectedTokens.id_token_summary || '-');
+    (__VLS_ctx.selectedTokens.refresh_token_summary || '-');
     __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
         ...{ class: "token-card" },
     });
@@ -1483,20 +1491,20 @@ if (__VLS_ctx.selectedAccount) {
         ...{ 'onClick': {} },
         link: true,
         type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.bind_card_url),
+        disabled: (!__VLS_ctx.selectedTokens.id_token),
     }));
     const __VLS_288 = __VLS_287({
         ...{ 'onClick': {} },
         link: true,
         type: "primary",
-        disabled: (!__VLS_ctx.selectedTokens.bind_card_url),
+        disabled: (!__VLS_ctx.selectedTokens.id_token),
     }, ...__VLS_functionalComponentArgsRest(__VLS_287));
     let __VLS_291;
     const __VLS_292 = ({ click: {} },
         { onClick: (...[$event]) => {
                 if (!(__VLS_ctx.selectedAccount))
                     return;
-                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.bind_card_url, '绑卡链接');
+                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.id_token, 'ID Token');
                 // @ts-ignore
                 [selectedTokens, selectedTokens, selectedTokens, copyValue,];
             } });
@@ -1506,7 +1514,95 @@ if (__VLS_ctx.selectedAccount) {
     var __VLS_289;
     var __VLS_290;
     __VLS_asFunctionalElement1(__VLS_intrinsics.code, __VLS_intrinsics.code)({});
+    (__VLS_ctx.selectedTokens.id_token_summary || '-');
+    __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
+        ...{ class: "token-card" },
+    });
+    /** @type {__VLS_StyleScopedClasses['token-card']} */ ;
+    __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
+        ...{ class: "token-card__header" },
+    });
+    /** @type {__VLS_StyleScopedClasses['token-card__header']} */ ;
+    __VLS_asFunctionalElement1(__VLS_intrinsics.span, __VLS_intrinsics.span)({
+        ...{ class: "detail-item__label" },
+    });
+    /** @type {__VLS_StyleScopedClasses['detail-item__label']} */ ;
+    let __VLS_294;
+    /** @ts-ignore @type {typeof __VLS_components.elButton | typeof __VLS_components.ElButton | typeof __VLS_components.elButton | typeof __VLS_components.ElButton} */
+    elButton;
+    // @ts-ignore
+    const __VLS_295 = __VLS_asFunctionalComponent1(__VLS_294, new __VLS_294({
+        ...{ 'onClick': {} },
+        link: true,
+        type: "primary",
+        disabled: (!__VLS_ctx.selectedTokens.bind_card_url),
+    }));
+    const __VLS_296 = __VLS_295({
+        ...{ 'onClick': {} },
+        link: true,
+        type: "primary",
+        disabled: (!__VLS_ctx.selectedTokens.bind_card_url),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_295));
+    let __VLS_299;
+    const __VLS_300 = ({ click: {} },
+        { onClick: (...[$event]) => {
+                if (!(__VLS_ctx.selectedAccount))
+                    return;
+                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.bind_card_url, '绑卡短链');
+                // @ts-ignore
+                [selectedTokens, selectedTokens, selectedTokens, copyValue,];
+            } });
+    const { default: __VLS_301 } = __VLS_297.slots;
+    // @ts-ignore
+    [];
+    var __VLS_297;
+    var __VLS_298;
+    __VLS_asFunctionalElement1(__VLS_intrinsics.code, __VLS_intrinsics.code)({});
     (__VLS_ctx.selectedTokens.bind_card_url_summary || '-');
+    __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
+        ...{ class: "token-card" },
+    });
+    /** @type {__VLS_StyleScopedClasses['token-card']} */ ;
+    __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
+        ...{ class: "token-card__header" },
+    });
+    /** @type {__VLS_StyleScopedClasses['token-card__header']} */ ;
+    __VLS_asFunctionalElement1(__VLS_intrinsics.span, __VLS_intrinsics.span)({
+        ...{ class: "detail-item__label" },
+    });
+    /** @type {__VLS_StyleScopedClasses['detail-item__label']} */ ;
+    let __VLS_302;
+    /** @ts-ignore @type {typeof __VLS_components.elButton | typeof __VLS_components.ElButton | typeof __VLS_components.elButton | typeof __VLS_components.ElButton} */
+    elButton;
+    // @ts-ignore
+    const __VLS_303 = __VLS_asFunctionalComponent1(__VLS_302, new __VLS_302({
+        ...{ 'onClick': {} },
+        link: true,
+        type: "primary",
+        disabled: (!__VLS_ctx.selectedTokens.bind_card_long_url),
+    }));
+    const __VLS_304 = __VLS_303({
+        ...{ 'onClick': {} },
+        link: true,
+        type: "primary",
+        disabled: (!__VLS_ctx.selectedTokens.bind_card_long_url),
+    }, ...__VLS_functionalComponentArgsRest(__VLS_303));
+    let __VLS_307;
+    const __VLS_308 = ({ click: {} },
+        { onClick: (...[$event]) => {
+                if (!(__VLS_ctx.selectedAccount))
+                    return;
+                __VLS_ctx.copyValue(__VLS_ctx.selectedTokens.bind_card_long_url, '绑卡长链');
+                // @ts-ignore
+                [selectedTokens, selectedTokens, selectedTokens, copyValue,];
+            } });
+    const { default: __VLS_309 } = __VLS_305.slots;
+    // @ts-ignore
+    [];
+    var __VLS_305;
+    var __VLS_306;
+    __VLS_asFunctionalElement1(__VLS_intrinsics.code, __VLS_intrinsics.code)({});
+    (__VLS_ctx.selectedTokens.bind_card_long_url_summary || '-');
 }
 // @ts-ignore
 [selectedTokens,];

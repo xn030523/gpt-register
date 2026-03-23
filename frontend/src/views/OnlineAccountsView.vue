@@ -14,6 +14,10 @@
         <strong class="summary-card__value">{{ countByStatus('disabled') }}</strong>
       </el-card>
       <el-card class="summary-card page-card" shadow="never">
+        <span class="summary-card__label">限额中</span>
+        <strong class="summary-card__value">{{ usageLimitedCount }}</strong>
+      </el-card>
+      <el-card class="summary-card page-card" shadow="never">
         <span class="summary-card__label">Token 失效</span>
         <strong class="summary-card__value">{{ invalidTokenCount }}</strong>
       </el-card>
@@ -24,7 +28,7 @@
         <div class="toolbar">
           <div>
             <h3 class="page-title">线上账号管理</h3>
-            <p class="page-subtitle">从线上服务获取账号列表，自动检测 Token 失效账号并支持一键删除。</p>
+            <p class="page-subtitle">从线上服务获取账号列表，自动处理限额账号禁用/恢复，并支持清理 Token 失效账号。</p>
           </div>
           <div class="toolbar__actions">
             <el-button
@@ -50,6 +54,7 @@
         <el-select v-model="filterStatus" clearable placeholder="全部状态">
           <el-option label="有效" value="active" />
           <el-option label="禁用" value="disabled" />
+          <el-option label="限额中" value="usage_limited" />
           <el-option label="Token 失效" value="token_invalid" />
         </el-select>
       </div>
@@ -64,9 +69,17 @@
         <el-table-column prop="account" label="邮箱" min-width="240" />
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" effect="light">
-              {{ row.status }}
+            <el-tag :type="statusTagType(row)" effect="light">
+              {{ statusLabel(row) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="限额状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="usageLimitState(row) === 'limited'" type="warning" effect="plain">限额中</el-tag>
+            <el-tag v-else-if="usageLimitState(row) === 'recoverable'" type="info" effect="plain">待恢复</el-tag>
+            <el-tag v-else-if="usageLimitState(row) === 'recovered'" type="success" effect="plain">已恢复</el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="Token 状态" width="140">
@@ -78,6 +91,11 @@
         <el-table-column label="套餐" width="100">
           <template #default="{ row }">
             {{ row.id_token?.plan_type || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="恢复时间" min-width="180">
+          <template #default="{ row }">
+            {{ formatRecoveryTime(row) }}
           </template>
         </el-table-column>
         <el-table-column label="创建时间" min-width="180">
@@ -123,6 +141,15 @@ type IdToken = {
   plan_type?: string
 }
 
+type StatusMessagePayload = {
+  error?: {
+    code?: string
+    type?: string
+    resets_at?: number | string
+    resets_in_seconds?: number | string
+  }
+}
+
 type AuthFile = {
   id: string
   name: string
@@ -139,14 +166,6 @@ type AuthFile = {
   type: string
 }
 
-const INVALID_STATUS_MESSAGE = {
-  error: {
-    message: 'Your authentication token has been invalidated. Please try signing in again.',
-    type: 'invalid_request_error',
-    code: 'token_invalidated',
-  },
-}
-
 const files = ref<AuthFile[]>([])
 const loading = ref(false)
 const deletingId = ref<string | null>(null)
@@ -155,16 +174,40 @@ const searchText = ref('')
 const filterStatus = ref('')
 
 function isTokenInvalid(file: AuthFile): boolean {
-  if (!file.status_message) return false
+  const payload = parseStatusMessage(file)
+  if (!payload) return false
+  return payload.error?.code === 'token_invalidated'
+}
+
+function parseStatusMessage(file: AuthFile): StatusMessagePayload | null {
+  if (!file.status_message) return null
   try {
-    const parsed = JSON.parse(file.status_message)
-    return parsed?.error?.code === 'token_invalidated'
+    return JSON.parse(file.status_message) as StatusMessagePayload
   } catch {
-    return false
+    return null
   }
 }
 
 const invalidFiles = computed(() => files.value.filter(isTokenInvalid))
+
+function effectiveStatus(file: AuthFile): string {
+  return file.disabled ? 'disabled' : file.status
+}
+
+function usageLimitState(file: AuthFile): 'none' | 'limited' | 'recoverable' | 'recovered' {
+  if (!isUsageLimited(file)) {
+    return 'none'
+  }
+
+  const resetAt = usageLimitResetAt(file)
+  if (resetAt === null || resetAt > Date.now()) {
+    return 'limited'
+  }
+  if (file.disabled) {
+    return 'recoverable'
+  }
+  return 'recovered'
+}
 
 const filteredFiles = computed(() => {
   let result = files.value
@@ -176,19 +219,116 @@ const filteredFiles = computed(() => {
   }
   if (filterStatus.value === 'token_invalid') {
     result = result.filter(isTokenInvalid)
+  } else if (filterStatus.value === 'usage_limited') {
+    result = result.filter((f) => usageLimitState(f) === 'limited')
   } else if (filterStatus.value) {
-    result = result.filter((f) => f.status === filterStatus.value)
+    result = result.filter((f) => effectiveStatus(f) === filterStatus.value)
   }
   return result
 })
 
 function countByStatus(status: string): number {
-  return files.value.filter((f) => f.status === status).length
+  return files.value.filter((f) => effectiveStatus(f) === status).length
 }
 
 const invalidTokenCount = computed(() => invalidFiles.value.length)
+const usageLimitedCount = computed(() => files.value.filter((f) => usageLimitState(f) === 'limited').length)
 
-async function loadFiles() {
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function usageLimitResetAt(file: AuthFile): number | null {
+  const payload = parseStatusMessage(file)
+  if (payload?.error?.type !== 'usage_limit_reached') {
+    return null
+  }
+
+  const resetsAt = numberFromUnknown(payload.error.resets_at)
+  if (resetsAt !== null && resetsAt > 0) {
+    return resetsAt * 1000
+  }
+
+  const resetsInSeconds = numberFromUnknown(payload.error.resets_in_seconds)
+  if (resetsInSeconds !== null) {
+    return Date.now() + Math.max(resetsInSeconds, 0) * 1000
+  }
+
+  return null
+}
+
+function isUsageLimited(file: AuthFile): boolean {
+  return parseStatusMessage(file)?.error?.type === 'usage_limit_reached'
+}
+
+function shouldAutoDisableForLimit(file: AuthFile): boolean {
+  if (!isUsageLimited(file) || file.disabled) {
+    return false
+  }
+  const resetAt = usageLimitResetAt(file)
+  return resetAt === null || resetAt > Date.now()
+}
+
+function shouldAutoEnableAfterLimit(file: AuthFile): boolean {
+  if (!file.disabled || !isUsageLimited(file)) {
+    return false
+  }
+  const resetAt = usageLimitResetAt(file)
+  return resetAt !== null && resetAt <= Date.now()
+}
+
+async function updateFileDisabledStatus(file: AuthFile, disabled: boolean) {
+  const response = await fetch(`${MANAGEMENT_BASE}/v0/management/auth-files/status`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${MANAGEMENT_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: file.name,
+      disabled,
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
+}
+
+async function syncUsageLimitAccountStates(nextFiles: AuthFile[]): Promise<boolean> {
+  let changed = false
+  const failedAccounts: string[] = []
+
+  for (const file of nextFiles) {
+    const shouldDisable = shouldAutoDisableForLimit(file)
+    const shouldEnable = !shouldDisable && shouldAutoEnableAfterLimit(file)
+    if (!shouldDisable && !shouldEnable) {
+      continue
+    }
+
+    try {
+      await updateFileDisabledStatus(file, shouldDisable)
+      changed = true
+    } catch (e) {
+      console.error('sync usage limit state failed', file.name, e)
+      failedAccounts.push(file.account || file.email || file.name)
+    }
+  }
+
+  if (failedAccounts.length > 0) {
+    ElMessage.warning(`部分限额账号状态同步失败: ${failedAccounts.join('、')}`)
+  }
+
+  return changed
+}
+
+async function loadFiles(syncUsageLimit = true) {
   loading.value = true
   try {
     const response = await fetch(`${MANAGEMENT_BASE}/v0/management/auth-files`, {
@@ -198,7 +338,17 @@ async function loadFiles() {
       throw new Error(`HTTP ${response.status}`)
     }
     const data = (await response.json()) as { files: AuthFile[] }
-    files.value = data.files ?? []
+    const nextFiles = data.files ?? []
+
+    if (syncUsageLimit) {
+      const changed = await syncUsageLimitAccountStates(nextFiles)
+      if (changed) {
+        await loadFiles(false)
+        return
+      }
+    }
+
+    files.value = nextFiles
   } catch (e) {
     ElMessage.error('加载线上账号失败: ' + (e instanceof Error ? e.message : String(e)))
   } finally {
@@ -288,8 +438,18 @@ function formatDate(value?: string) {
   })
 }
 
-function statusTagType(status: string) {
-  switch (status) {
+function formatRecoveryTime(file: AuthFile) {
+  const resetAt = usageLimitResetAt(file)
+  if (resetAt === null) return '-'
+  return formatDate(new Date(resetAt).toISOString())
+}
+
+function statusTagType(file: AuthFile) {
+  if (usageLimitState(file) === 'limited') {
+    return 'warning'
+  }
+
+  switch (effectiveStatus(file)) {
     case 'active':
       return 'success'
     case 'disabled':
@@ -297,6 +457,16 @@ function statusTagType(status: string) {
     default:
       return 'warning'
   }
+}
+
+function statusLabel(file: AuthFile) {
+  if (usageLimitState(file) === 'limited' && file.disabled) {
+    return '限额禁用'
+  }
+  if (usageLimitState(file) === 'limited') {
+    return '限额中'
+  }
+  return effectiveStatus(file)
 }
 
 onMounted(() => {

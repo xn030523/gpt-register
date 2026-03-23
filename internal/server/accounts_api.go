@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"codex-register/internal/runtime"
+	"codex-register/internal/store"
 )
 
 func (a *apiServer) handleAccountRoute(w http.ResponseWriter, req *http.Request) {
@@ -30,7 +32,15 @@ func (a *apiServer) handleAccountRoute(w http.ResponseWriter, req *http.Request)
 
 	switch parts[1] {
 	case "tokens":
-		a.handleAccountTokens(w, req, accountID)
+		if len(parts) == 2 {
+			a.handleAccountTokens(w, req, accountID)
+			return
+		}
+		if len(parts) == 3 && parts[2] == "regenerate-links" {
+			a.handleAccountBindCardLinksRegenerate(w, req, accountID)
+			return
+		}
+		http.NotFound(w, req)
 	case "refresh":
 		a.handleAccountRefresh(w, req, accountID)
 	case "validate":
@@ -76,32 +86,33 @@ func (a *apiServer) handleAccountTokens(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	bindCardURL := accountExtraString(account.ExtraData, "bind_card_url")
-	if bindCardURL == "" && account.AccessToken != nil {
-		generatedURL, err := runtime.GenerateBindCardLink(req.Context(), *account.AccessToken, pointerValue(account.ProxyUsed))
-		if err == nil && generatedURL != "" {
-			bindCardURL = generatedURL
-			mergedExtra := cloneExtraData(account.ExtraData)
-			mergedExtra["bind_card_url"] = generatedURL
-			if updateErr := a.store.UpdateAccount(req.Context(), accountID, map[string]any{"extra_data": mergedExtra}); updateErr == nil {
-				account.ExtraData = mergedExtra
-			}
-		}
+	bindCardURL, bindCardLongURL, _ := a.ensureBindCardLinks(req.Context(), accountID, account, false)
+	writeAccountTokensResponse(w, account, bindCardURL, bindCardLongURL)
+}
+
+func (a *apiServer) handleAccountBindCardLinksRegenerate(w http.ResponseWriter, req *http.Request, accountID int) {
+	if req.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":                    account.ID,
-		"email":                 account.Email,
-		"access_token":          pointerValue(account.AccessToken),
-		"access_token_summary":  truncateValue(pointerValue(account.AccessToken), 50),
-		"refresh_token":         pointerValue(account.RefreshToken),
-		"refresh_token_summary": truncateValue(pointerValue(account.RefreshToken), 50),
-		"id_token":              pointerValue(account.IDToken),
-		"id_token_summary":      truncateValue(pointerValue(account.IDToken), 50),
-		"bind_card_url":         bindCardURL,
-		"bind_card_url_summary": truncateValue(bindCardURL, 72),
-		"has_tokens":            account.AccessToken != nil && account.RefreshToken != nil,
-	})
+	account, err := a.store.GetAccountTokensByID(req.Context(), accountID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if account == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "账号不存在"})
+		return
+	}
+
+	bindCardURL, bindCardLongURL, err := a.ensureBindCardLinks(req.Context(), accountID, account, true)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeAccountTokensResponse(w, account, bindCardURL, bindCardLongURL)
 }
 
 func (a *apiServer) handleAccountRefresh(w http.ResponseWriter, req *http.Request, accountID int) {
@@ -304,6 +315,69 @@ func truncateToken(value *string) any {
 	return truncateValue(trimmed, 50)
 }
 
+func writeAccountTokensResponse(w http.ResponseWriter, account *store.AccountTokens, bindCardURL, bindCardLongURL string) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":                         account.ID,
+		"email":                      account.Email,
+		"access_token":               pointerValue(account.AccessToken),
+		"access_token_summary":       truncateValue(pointerValue(account.AccessToken), 50),
+		"refresh_token":              pointerValue(account.RefreshToken),
+		"refresh_token_summary":      truncateValue(pointerValue(account.RefreshToken), 50),
+		"id_token":                   pointerValue(account.IDToken),
+		"id_token_summary":           truncateValue(pointerValue(account.IDToken), 50),
+		"bind_card_url":              bindCardURL,
+		"bind_card_url_summary":      truncateValue(bindCardURL, 72),
+		"bind_card_long_url":         bindCardLongURL,
+		"bind_card_long_url_summary": truncateValue(bindCardLongURL, 120),
+		"has_tokens":                 account.AccessToken != nil && account.RefreshToken != nil,
+	})
+}
+
+func (a *apiServer) ensureBindCardLinks(
+	ctx context.Context,
+	accountID int,
+	account *store.AccountTokens,
+	force bool,
+) (string, string, error) {
+	bindCardURL := accountExtraString(account.ExtraData, "bind_card_url")
+	bindCardLongURL := accountExtraString(account.ExtraData, "bind_card_long_url")
+	if !force && bindCardURL != "" && bindCardLongURL != "" {
+		return bindCardURL, bindCardLongURL, nil
+	}
+	if account.AccessToken == nil {
+		return bindCardURL, bindCardLongURL, nil
+	}
+
+	links, err := runtime.GenerateBindCardLinks(ctx, *account.AccessToken, pointerValue(account.ProxyUsed))
+	if err != nil {
+		return bindCardURL, bindCardLongURL, err
+	}
+
+	if force || bindCardURL == "" {
+		bindCardURL = strings.TrimSpace(links.ShortURL)
+	}
+	if force || bindCardLongURL == "" {
+		bindCardLongURL = strings.TrimSpace(links.LongURL)
+	}
+
+	mergedExtra := cloneExtraData(account.ExtraData)
+	if bindCardURL != "" {
+		mergedExtra["bind_card_url"] = bindCardURL
+		mergedExtra["bind_card_url_summary"] = summarizeValue(bindCardURL, 88)
+	}
+	if bindCardLongURL != "" {
+		mergedExtra["bind_card_long_url"] = bindCardLongURL
+		mergedExtra["bind_card_long_url_summary"] = summarizeValue(bindCardLongURL, 140)
+	}
+	if len(mergedExtra) > 0 {
+		if updateErr := a.store.UpdateAccount(ctx, accountID, map[string]any{"extra_data": mergedExtra}); updateErr == nil {
+			account.ExtraData = mergedExtra
+		}
+	}
+
+	return bindCardURL, bindCardLongURL, nil
+}
+
 func truncateValue(value string, keep int) any {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -316,6 +390,11 @@ func truncateValue(value string, keep int) any {
 		return trimmed
 	}
 	return trimmed[:keep] + "..."
+}
+
+func summarizeValue(value string, keep int) string {
+	summary, _ := truncateValue(value, keep).(string)
+	return summary
 }
 
 func accountExtraString(extra map[string]any, key string) string {
